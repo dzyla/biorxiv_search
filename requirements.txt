@@ -1,0 +1,11 @@
+streamlit
+pandas
+torch @ https://download.pytorch.org/whl/cpu/torch-2.2.2%2Bcpu-cp311-cp311-linux_x86_64.whl
+numpy
+sentence-transformers
+faiss-cpu
+transformers
+plotly
+python-doi
+groq
+dropbox
