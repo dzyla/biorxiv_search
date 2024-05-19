@@ -249,7 +249,7 @@ def download_folder(dropbox_path, local_path):
 
 def download_data_from_dropbox():
     # Check if 'last_download_time' is in the session state and if 24 hours have passed
-    if 'last_download_time' not in st.session_state or (datetime.now() - st.session_state.last_download_time > timedelta(hours=24)):
+    if True:
         placeholder = st.empty()
         placeholder.write('Downloading data...')
         
