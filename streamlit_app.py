@@ -265,7 +265,7 @@ def download_data_from_dropbox():
         placeholder.empty()
 
 # Load data and embeddings
-@st.cache_resource
+@st.cache_resource(ttl='1d')
 def load_data_embeddings():
     existing_data_path = "aggregated_data"
     new_data_directory = "db_update"
