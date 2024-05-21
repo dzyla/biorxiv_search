@@ -215,6 +215,8 @@ def list_files(dropbox_path):
 def download_folder(dropbox_path, local_path):
     placeholder = st.empty()
     dbx = connect_to_dropbox()
+    cache_cleared = False
+
     try:
         if not os.path.exists(local_path):
             os.makedirs(local_path)
@@ -235,13 +237,21 @@ def download_folder(dropbox_path, local_path):
                     if local_mod_time >= dropbox_mod_time:
                         placeholder.write(f"Skipped {entry.name}, already up-to-date.")
                         continue
-                placeholder.write(f'Downloading database {entry.name}')
+                
+                # Clear cache only once before downloading a new file
+                if not cache_cleared:
+                    st.cache_resource_clear()
+                    cache_cleared = True
+
+                placeholder.write(f'Downloading {entry.name}')
                 dbx.files_download_to_file(str(local_file_path), entry.path_lower)
             elif isinstance(entry, dropbox.files.FolderMetadata):
                 download_folder(entry.path_lower, str(local_file_path))
 
             current_file += 1
             progress_percent = int((current_file / total_files) * 100)
+            placeholder.write(f"Progress: {progress_percent}%")
+
         placeholder.empty()
     except Exception as e:
         st.error(f"Failed to download: {str(e)}")
