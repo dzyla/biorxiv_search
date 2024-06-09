@@ -215,8 +215,6 @@ def list_files(dropbox_path):
 def download_folder(dropbox_path, local_path):
     placeholder = st.empty()
     dbx = connect_to_dropbox()
-    cache_cleared = False
-
     try:
         if not os.path.exists(local_path):
             os.makedirs(local_path)
@@ -230,28 +228,15 @@ def download_folder(dropbox_path, local_path):
         for entry in response.entries:
             local_file_path = Path(local_path) / entry.name
             if isinstance(entry, dropbox.files.FileMetadata):
-                # Check if the file exists and compare modification times
-                if local_file_path.exists():
-                    local_mod_time = local_file_path.stat().st_mtime
-                    dropbox_mod_time = entry.client_modified.timestamp()
-                    if local_mod_time >= dropbox_mod_time:
-                        placeholder.write(f"Skipped {entry.name}, already up-to-date.")
-                        continue
-                
-                # Clear cache only once before downloading a new file
-                if not cache_cleared:
-                    st.cache_resource_clear()
-                    cache_cleared = True
-
-                placeholder.write(f'Downloading {entry.name}')
-                dbx.files_download_to_file(str(local_file_path), entry.path_lower)
+                # Only download if the file does not exist locally
+                if not local_file_path.exists():
+                    placeholder.write(f'Downloading {entry.name}')
+                    dbx.files_download_to_file(str(local_file_path), entry.path_lower)
             elif isinstance(entry, dropbox.files.FolderMetadata):
+                # Recursively download contents of the directory
                 download_folder(entry.path_lower, str(local_file_path))
 
             current_file += 1
-            progress_percent = int((current_file / total_files) * 100)
-            placeholder.write(f"Progress: {progress_percent}%")
-
         placeholder.empty()
     except Exception as e:
         st.error(f"Failed to download: {str(e)}")
@@ -275,7 +260,7 @@ def download_data_from_dropbox():
         placeholder.empty()
 
 # Load data and embeddings
-@st.cache_resource(ttl='1d')
+@st.cache_resource(ttl="1d")
 def load_data_embeddings():
     existing_data_path = "aggregated_data"
     new_data_directory = "db_update"
