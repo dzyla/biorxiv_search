@@ -263,32 +263,57 @@ def download_data_from_dropbox():
 @st.cache_resource(ttl="1d")
 def load_data_embeddings():
     existing_data_path = "aggregated_data"
-    new_data_directory = "db_update"
+    new_data_directory_bio = "db_update"
     existing_embeddings_path = "biorxiv_ubin_embaddings.npy"
-    updated_embeddings_directory = "embed_update"
+    updated_embeddings_directory_bio = "embed_update"
 
+    new_data_directory_med = "db_update_med"
+    updated_embeddings_directory_med = "embed_update_med"
+    
     # Load existing database and embeddings
     df_existing = pd.read_parquet(existing_data_path)
     embeddings_existing = np.load(existing_embeddings_path, allow_pickle=True)
+
+    print(f"Existing data shape: {df_existing.shape}, Existing embeddings shape: {embeddings_existing.shape}")
+
+    # Determine the embedding size from existing embeddings
+    embedding_size = embeddings_existing.shape[1]
 
     # Prepare lists to collect new updates
     df_updates_list = []
     embeddings_updates_list = []
 
-    # Ensure pairing of new data and embeddings by their matching filenames
-    new_data_files = sorted(Path(new_data_directory).glob("*.parquet"))
-    for data_file in new_data_files:
-        # Assuming naming convention allows direct correlation
-        corresponding_embedding_file = Path(updated_embeddings_directory) / (
-            data_file.stem + ".npy"
-        )
+    # Helper function to process updates from a specified directory
+    def process_updates(new_data_directory, updated_embeddings_directory):
+        new_data_files = sorted(Path(new_data_directory).glob("*.parquet"))
+        print(new_data_files)
+        for data_file in new_data_files:
+            corresponding_embedding_file = Path(updated_embeddings_directory) / (
+                data_file.stem + ".npy"
+            )
 
-        if corresponding_embedding_file.exists():
-            # Load and append DataFrame and embeddings
-            df_updates_list.append(pd.read_parquet(data_file))
-            embeddings_updates_list.append(np.load(corresponding_embedding_file))
-        else:
-            print(f"No corresponding embedding file found for {data_file.name}")
+            if corresponding_embedding_file.exists():
+                df = pd.read_parquet(data_file)
+                new_embeddings = np.load(corresponding_embedding_file, allow_pickle=True)
+                
+                # Check if the number of rows in the DataFrame matches the number of rows in the embeddings
+                if df.shape[0] != new_embeddings.shape[0]:
+                    print(f"Shape mismatch for {data_file.name}: DataFrame has {df.shape[0]} rows, embeddings have {new_embeddings.shape[0]} rows. Skipping.")
+                    continue
+                
+                # Check embedding size and adjust if necessary
+                if new_embeddings.shape[1] != embedding_size:
+                    print(f"Skipping {data_file.name} due to embedding size mismatch.")
+                    continue
+
+                df_updates_list.append(df)
+                embeddings_updates_list.append(new_embeddings)
+            else:
+                print(f"No corresponding embedding file found for {data_file.name}")
+
+    # Process updates from both BioRxiv and MedArXiv
+    process_updates(new_data_directory_bio, updated_embeddings_directory_bio)
+    process_updates(new_data_directory_med, updated_embeddings_directory_med)
 
     # Concatenate all updates
     if df_updates_list:
@@ -304,7 +329,7 @@ def load_data_embeddings():
     # Append new data to existing, handling duplicates as needed
     df_combined = pd.concat([df_existing, df_updates])
 
-    # create a mask for filtering
+    # Create a mask for filtering
     mask = ~df_combined.duplicated(subset=["title"], keep="last")
     df_combined = df_combined[mask]
 
@@ -315,20 +340,21 @@ def load_data_embeddings():
         else embeddings_existing
     )
 
-    # filter the embeddings based on dataframe unique entries
+    # Filter the embeddings based on the dataframe unique entries
     embeddings_combined = embeddings_combined[mask]
 
     return df_combined, embeddings_combined
 
+
 LLM_prompt = "Review the abstracts listed below and create a list and summary that captures their main themes and findings. Identify any commonalities across the abstracts and highlight these in your summary. Ensure your response is concise, avoids external links, and is formatted in markdown.\n\n"
 
-def summarize_abstract(abstract, llm_model="llama3-70b-8192", instructions=LLM_prompt, api_key=st.secrets["groq_token"]):
+def summarize_abstract(abstract, llm_model="llama-3.1-70b-versatile", instructions=LLM_prompt, api_key=st.secrets["groq_token"]):
     """
     Summarizes the provided abstract using a specified LLM model.
     
     Parameters:
     - abstract (str): The abstract text to be summarized.
-    - llm_model (str): The LLM model used for summarization. Defaults to "llama3-70b-8192".
+    - llm_model (str): The LLM model used for summarization. Defaults to "llama-3.1-70b-versatile".
     
     Returns:
     - str: A summary of the abstract, condensed into one to two sentences.
@@ -390,16 +416,25 @@ def define_style():
     )
 
 
-def logo(db_update_date, db_size):
+def logo(db_update_date, db_size_bio, db_size_med):
     # Initialize Streamlit app
-    image_path = "https://www.biorxiv.org/sites/default/files/biorxiv_logo_homepage.png"
+    biorxiv_logo = "https://www.biorxiv.org/sites/default/files/biorxiv_logo_homepage.png"
+    medarxiv_logo = "https://www.medrxiv.org/sites/default/files/medRxiv_homepage_logo.png"
     st.markdown(
         f"""
-        <div style='text-align: center;'>
-            <img src='{image_path}' alt='BioRxiv logo' style='max-height: 100px;'>
-            <h3 style='color: black;'>Manuscript Semantic Search [bMSS]</h1>
-            Last database update: {db_update_date}; Database size: {db_size} entries
+        <div style='display: flex; justify-content: center; align-items: center;'>
+            <div style='margin-right: 20px;'>
+                <img src='{biorxiv_logo}' alt='BioRxiv logo' style='max-height: 100px;'>
+            </div>
+            <div style='margin-left: 20px;'>
+                <img src='{medarxiv_logo}' alt='medRxiv logo' style='max-height: 100px;'>
+            </div>
         </div>
+        <div style='text-align: center; margin-top: 10px;'>
+            <h3 style='color: black;'>Manuscript Semantic Search [bMSS]</h3>
+            Last database update: {db_update_date}; Database size: bioRxiv: {db_size_bio} / medRxiv: {db_size_med} entries
+        </div>
+        <br>
         """,
         unsafe_allow_html=True,
     )
@@ -413,7 +448,7 @@ download_data_from_dropbox()
 define_style()
 
 df, embeddings_unique = load_data_embeddings()
-logo(df["date"].max(), df.shape[0])
+logo(df["date"].max(), df[df['server']=='biorxiv'].shape[0], df[df['server']=='medrxiv'].shape[0])
 
 # model = model_to_device()
 
@@ -474,7 +509,7 @@ if query:
         )
 
         # Prepare the results for plotting
-        plot_data = {"Date": [], "Title": [], "Score": [], "DOI": [], "category": []}
+        plot_data = {"Date": [], "Title": [], "Score": [], "DOI": [], "category": [], "server": []}
 
         search_df = pd.DataFrame(results[0])
 
@@ -503,11 +538,14 @@ if query:
             plot_data["Score"].append(search_df["score"][index])  # type: ignore
             plot_data["DOI"].append(row["doi"])
             plot_data["category"].append(row["category"])
+            plot_data["server"].append(row["server"])
 
             #summary_text = summarize_abstract(row['abstract'])
 
             with st.expander(f"{index+1}\. {row['title']}"): # type: ignore
-                st.markdown(f"**Score:** {entry['score']:.1f}")
+                col1, col2 = st.columns(2)
+                col1.markdown(f"**Score:** {entry['score']:.1f}")
+                col2.markdown(f"**Server:** [{row['server']}]")
                 st.markdown(f"**Authors:** {row['authors']}")
                 col1, col2 = st.columns(2)
                 col2.markdown(f"**Category:** {row['category']}")
@@ -556,6 +594,7 @@ if query:
             x="Date",
             y="Score",
             hover_data=["Title", "DOI"],
+            color='server',
             title="Publication Times and Scores",
         )
         fig.update_traces(marker=dict(size=10))

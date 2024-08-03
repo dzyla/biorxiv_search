@@ -11,4 +11,4 @@ cd /tmp/bmss
 
 # Run the Python script
 python update_database.py
-
+python update_database_medarxiv.py
