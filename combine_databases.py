@@ -25,13 +25,14 @@ def combine_databases():
     bio_embeddings_list = []
 
     # Helper function to process updates from a specified directory
-    def process_updates(new_data_directory, updated_embeddings_directory, dfs_list, embeddings_list):
+    def process_updates(new_data_directory, updated_embeddings_directory, dfs_list, embeddings_list, server_name):
         new_data_files = sorted(Path(new_data_directory).glob("*.parquet"))
         for data_file in new_data_files:
             corresponding_embedding_file = Path(updated_embeddings_directory) / (data_file.stem + ".npy")
 
             if corresponding_embedding_file.exists():
                 df = pd.read_parquet(data_file)
+                df['server'] = server_name  # Add server column
                 new_embeddings = np.load(corresponding_embedding_file, allow_pickle=True)
 
                 # Check if the number of rows in the DataFrame matches the number of rows in the embeddings
@@ -50,87 +51,50 @@ def combine_databases():
                 print(f"No corresponding embedding file found for {data_file.name}")
 
     # Process updates from both BioRxiv and MedRxiv
-    process_updates(db_update_bio_path, embed_update_bio_path, bio_dfs_list, bio_embeddings_list)
+    process_updates(db_update_bio_path, embed_update_bio_path, bio_dfs_list, bio_embeddings_list, 'biorxiv')
+    process_updates(db_update_med_path, embed_update_med_path, bio_dfs_list, bio_embeddings_list, 'medrxiv')
 
-    # Concatenate all BioRxiv updates
+    # Concatenate all BioRxiv and MedRxiv updates
     if bio_dfs_list:
-        df_bio_updates = pd.concat(bio_dfs_list)
+        df_combined = pd.concat(bio_dfs_list)
     else:
-        df_bio_updates = pd.DataFrame()
+        df_combined = pd.DataFrame()
 
     if bio_embeddings_list:
-        bio_embeddings_updates = np.vstack(bio_embeddings_list)
+        embeddings_combined = np.vstack(bio_embeddings_list)
     else:
-        bio_embeddings_updates = np.array([])
+        embeddings_combined = np.array([])
 
-    # Append new BioRxiv data to existing, handling duplicates as needed
-    df_bio_combined = pd.concat([df_bio_existing, df_bio_updates])
+    # Append new data to existing, handling duplicates as needed
+    df_combined = pd.concat([df_bio_existing, df_combined])
 
     # Create a mask for filtering unique titles
-    bio_mask = ~df_bio_combined.duplicated(subset=["title"], keep="last")
-    df_bio_combined = df_bio_combined[bio_mask]
+    mask = ~df_combined.duplicated(subset=["title"], keep="last")
+    df_combined = df_combined[mask]
 
-    # Combine BioRxiv embeddings, ensuring alignment with the DataFrame
-    bio_embeddings_combined = (
-        np.vstack([bio_embeddings_existing, bio_embeddings_updates])
-        if bio_embeddings_updates.size
+    # Combine embeddings, ensuring alignment with the DataFrame
+    embeddings_combined = (
+        np.vstack([bio_embeddings_existing, embeddings_combined])
+        if embeddings_combined.size
         else bio_embeddings_existing
     )
 
     # Filter the embeddings based on the DataFrame unique entries
-    bio_embeddings_combined = bio_embeddings_combined[bio_mask]
+    embeddings_combined = embeddings_combined[mask]
 
-    assert df_bio_combined.shape[0] == bio_embeddings_combined.shape[0], "Shape mismatch between BioRxiv DataFrame and embeddings"
+    assert df_combined.shape[0] == embeddings_combined.shape[0], "Shape mismatch between DataFrame and embeddings"
 
-    print(f"Filtered BioRxiv DataFrame shape: {df_bio_combined.shape}")
-    print(f"Filtered BioRxiv embeddings shape: {bio_embeddings_combined.shape}")
+    print(f"Filtered DataFrame shape: {df_combined.shape}")
+    print(f"Filtered embeddings shape: {embeddings_combined.shape}")
 
-    # Save combined BioRxiv DataFrame and embeddings
-    combined_biorxiv_data_path = aggregated_data_path / "combined_biorxiv_data.parquet"
-    df_bio_combined.to_parquet(combined_biorxiv_data_path)
-    print(f"Saved combined BioRxiv DataFrame to {combined_biorxiv_data_path}")
+    # Save combined DataFrame and embeddings
+    combined_data_path = aggregated_data_path / "combined_data.parquet"
+    df_combined.to_parquet(combined_data_path)
+    print(f"Saved combined DataFrame to {combined_data_path}")
 
-    combined_biorxiv_embeddings_path = "biorxiv_ubin_embaddings.npy"
-    np.save(combined_biorxiv_embeddings_path, bio_embeddings_combined)
-    print(f"Saved combined BioRxiv embeddings to {combined_biorxiv_embeddings_path}")
-
-    # Prepare lists to collect new MedRxiv updates
-    med_dfs_list = []
-    med_embeddings_list = []
-
-    process_updates(db_update_med_path, embed_update_med_path, med_dfs_list, med_embeddings_list)
-
-    # Concatenate all MedRxiv updates
-    if med_dfs_list:
-        df_med_combined = pd.concat(med_dfs_list)
-    else:
-        df_med_combined = pd.DataFrame()
-
-    if med_embeddings_list:
-        med_embeddings_combined = np.vstack(med_embeddings_list)
-    else:
-        med_embeddings_combined = np.array([])
-
-    last_date_in_med_database = df_med_combined['date'].max() if not df_med_combined.empty else "unknown"
-
-    # Create a mask for filtering unique titles
-    med_mask = ~df_med_combined.duplicated(subset=["title"], keep="last")
-    df_med_combined = df_med_combined[med_mask]
-    med_embeddings_combined = med_embeddings_combined[med_mask]
-
-    assert df_med_combined.shape[0] == med_embeddings_combined.shape[0], "Shape mismatch between MedRxiv DataFrame and embeddings"
-
-    print(f"Filtered MedRxiv DataFrame shape: {df_med_combined.shape}")
-    print(f"Filtered MedRxiv embeddings shape: {med_embeddings_combined.shape}")
-
-    # Save combined MedRxiv DataFrame and embeddings
-    combined_medrxiv_data_path = db_update_med_path / f"database_{last_date_in_med_database}.parquet"
-    df_med_combined.to_parquet(combined_medrxiv_data_path)
-    print(f"Saved combined MedRxiv DataFrame to {combined_medrxiv_data_path}")
-
-    combined_medrxiv_embeddings_path = embed_update_med_path / f"database_{last_date_in_med_database}.npy"
-    np.save(combined_medrxiv_embeddings_path, med_embeddings_combined)
-    print(f"Saved combined MedRxiv embeddings to {combined_medrxiv_embeddings_path}")
+    combined_embeddings_path = "combined_ubin_embeddings.npy"
+    np.save(combined_embeddings_path, embeddings_combined)
+    print(f"Saved combined embeddings to {combined_embeddings_path}")
 
 if __name__ == "__main__":
     combine_databases()
